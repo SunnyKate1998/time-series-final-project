@@ -1,0 +1,67 @@
+---
+title: "TS_EDA"
+author: "Miao Fang"
+date: "2/27/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 0. Import dependencies.
+```{r}
+library(fpp)
+library(ggplot2)
+library(tseries)
+library(forecast)
+```
+
+## 1. Load the chickenpox data.
+
+```{r}
+chickenpox <- read.csv("C:/Users/fm980/Desktop/time series/final project/hungary_chickenpox.csv")
+head(chickenpox)
+```
+
+## 2. Get basic info of the dataset.
+### 2.1 Data description.
+```{r}
+summary(chickenpox)
+```
+### 2.2 Missing values.
+```{r}
+sum(is.na(chickenpox))
+```
+## 3. Make time plots.
+### 3.1 Make a time plot of the selected county(Budapest).
+```{r}
+budapest.ts <- ts(chickenpox['BUDAPEST'], start = 2005, frequency = 52)
+plot(budapest.ts, ylab = 'Cases', xlab = 'Years', main = 'Chickenpox cases in Budapest')
+```
+### 3.2 Make time plots of all counties.
+```{r, figures-side, fig.show="hold", out.width="50%"}
+# get all counties' names.
+counties <- names(chickenpox)[2:21]
+# plot in one figure.
+par(mar = c(5, 4, .1, .1))
+for (county in counties) {
+  county.ts <- ts(chickenpox[county], start = 2005, frequency = 52)
+  plot(county.ts, main=county, panel.first = grid(), ylab = 'Cases', xlab = 'Years')
+}
+```
+
+## 4. Examination of stationary.
+### 4.1 Make Acf of Budapest series.
+```{r, echo=FALSE}
+Acf(ts(chickenpox['BUDAPEST'], start = 2005, frequency = 52))
+```
+### 4.2 Difference transformation is needed.
+```{r}
+Acf(diff(ts(chickenpox['BUDAPEST'], start = 2005, frequency = 52)))
+```
+
+## 5. Examination of White noise(using Ljung-Box test).
+```{r}
+Box.test(ts(chickenpox['BUDAPEST'], start = 2005, frequency = 52), type = 'Lj', lag = 52)
+```
