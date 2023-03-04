@@ -3,13 +3,14 @@ title: "TS_Project_HTS"
 author: "Chinta"
 date: "2023-03-03"
 output:
+  pdf_document: default
   html_document:
     df_print: paged
 ---
 ## 0. Import dependencies.
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = FALSE)
 library(tidyverse)
 library(fpp)
 library(fpp2)
@@ -72,11 +73,23 @@ scan_gaps(hch.tsb) %>%
 hch.tsb_agg <- tsibble(hch.df, key = c(region, county), index = Date) %>% 
   aggregate_key(region/county, cases_count = sum(cases_count))
 
-hch.tsb_agg_train <- hch.tsb_agg %>% filter(year(Date) <= 2013)
-hch.tsb_agg_test <- hch.tsb_agg %>% filter(year(Date) > 2013)
+hch.tsb_agg_train <- hch.tsb_agg %>% filter((Date) <= yearmonth('2013 Jan'))
+hch.tsb_agg_test <- hch.tsb_agg %>% filter(year(Date) > 2012)
 
+#as.ts(hch.tsb_agg_train %>% 
+#  filter(is_aggregated(region)) %>% 
+#  select(Date, cases_count)) %>% 
+#  decompose(type="multiplicative")  %>%
+#  autoplot() + xlab("Year") +
+#  ggtitle("Classical multiplicative decomposition
+#    of electrical equipment index")
+
+#fit_t <-  hch.tsb_agg_train %>%  model(ets = ETS(cases_count))
+#report(fit_t %>% filter(is_aggregated(region)))
 ```
-
+*data |> aggregate_key() |> model() |>
+  reconcile() |> forecast()*
+  
 ## 3. Plot aggregate (country level) and Central Hungary training data.
 
 Plot the aggregate and Central Hungary training data to understand data. We see that Central Hungary has pretty heavy influence on the country-level data.
@@ -99,47 +112,98 @@ hch.tsb_agg_train %>%
 
 ```{r echo=FALSE}
 
-fit <- hch.tsb_agg_train %>% 
-  model(base = ETS(cases_count ~ trend("A"))) %>%  
-  #model(arima = ARIMA(cases_count))%>%
-  reconcile(bottom_up = bottom_up(base),
-            top_down = top_down(base),
-            min_trace = min_trace(base, "mint_shrink"))
+fit_f <- hch.tsb_agg_train %>% 
+  model(ets_m = ETS(cases_count)) %>%  
+  reconcile(bottom_up = bottom_up(ets_m),
+            top_down = top_down(ets_m),
+            min_trace_ = min_trace(ets_m, "mint_shrink"))
 
-fit_all <- hch.tsb_agg_train %>% 
-  model(ets = ETS(cases_count ~ trend("A")),
-        arima = ARIMA(cases_count)) %>%  
+fit_all <- hch.tsb_agg_train %>%
+  model(ets = ETS(cases_count),
+        arima = ARIMA(cases_count)) %>%
   reconcile(bu_ets = bottom_up(ets),
             td_ets = top_down(ets),
             min_trace_ets = min_trace(ets, "mint_shrink"),
             bu_arima = bottom_up(arima),
             td_arima = top_down(arima),
-            min_trace_arima = min_trace(arima, "mint_shrink")) 
+            min_trace_arima = min_trace(arima, "mint_shrink"))
 
-
+#report(fit %>% filter(is_aggregated(region)))
 ```
+
+Get the report:
 
 ```{r echo=FALSE}
-fit %>% 
-  select(region, county, base) %>%
-  filter(region=="Central Hungary") %>% 
-  coef()
+fit_f %>% filter(is_aggregated(region)) %>%  select(region, county,bottom_up,ets_m) %>% glance()
 
-fc_f <- fit %>% 
-  forecast(new_data = hch.tsb_agg_test) 
+fit_all %>% filter(is_aggregated(region)) %>%  select(region, county,ets, arima,bu_ets, bu_arima, td_ets, td_arima ) %>% glance()
+  
+#report(fit %>% filter(is_aggregated(region)) %>%  select(region, county,  bottom_up))
+```
+
+Run the forecast on the model using test data:
+
+```{r echo=FALSE}
+# fit %>% 
+#   filter(is_aggregated(region)) %>% 
+#   coef()
+
+fc_f <- fit_f %>% 
+  forecast(h=23) 
 
 fc_all <- fit_all %>% 
-  forecast(new_data = hch.tsb_agg_test) 
+  forecast(h=23) 
+
+# fc_all <- fit_all %>% 
+#   forecast(new_data = hch.tsb_agg_test) 
 
 ```
+
+```{r}
+
+fc_all %>%
+  accuracy(
+    data = hch.tsb_agg,
+    measures = list(rmse = RMSE, mase = MASE, mape = MAPE, mae=MAE)
+  ) %>%
+  filter(is_aggregated(region)) %>% 
+  #filter(.model == 'bottom_up') %>% 
+  arrange(rmse) %>% 
+  kable()
+
+```
+
+```{r}
+
+accuracy(fc_f , hch.tsb_agg,
+    measures = list(rmse = RMSE, mase = MASE, mape = MAPE, mae=MAE)) %>%  filter(is_aggregated(region)) 
+
+```
+
+```{r}
+fc_f_value <- (fc_f %>%  filter(year(Date) > 2012) %>%  as_tibble() %>%   filter(is_aggregated(region)) %>%  filter(.model =='ets_m') %>% transmute(region = if_else(is_aggregated(region), 'aggregated', as.character(region)),Date,model = .model,forecast = .mean) %>%   select(Date, forecast)) %>% left_join(hch.tsb_agg_test %>% as_tibble() %>% filter(is_aggregated(region)) %>% select(Date, cases_count),by = join_by(Date)) %>% mutate(mae = abs(forecast-cases_count)) %>% mutate(diff = (forecast-cases_count))
+
+rmse = sqrt(mean(fc_f_value$diff^2))
+
+rmse
+
+
+mean(fc_f_value$mae)
+
+components(fit_all %>% filter(is_aggregated(region)) %>%  select(ets) )   %>% filter(year(Date) > 2004) %>% 
+  autoplot() +
+  labs(title = "ETS(M,N,A) components")
+```
+
 
 Plot the forecast at the country-level and all the regions
 
 ```{r echo=FALSE}
-autoplot(fc_f, hch.tsb_agg %>% ungroup() %>% filter(year(Date) >2012), level = NULL) + 
+autoplot(fc_all %>% filter(is_aggregated(region)), 
+         hch.tsb_agg %>% ungroup() %>% filter(year(Date) >2011), level = NULL) + 
   facet_wrap(~region, scales = "free_y") + 
   scale_y_continuous(labels = scales::comma_format()) + 
-  labs(color = "", x = "Date" ,y = "Number of Fares") + 
+  labs(color = "", x = "Date" ,y = "Number of cases") + 
   theme(
     legend.position = 'bottom',
     axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)
@@ -149,14 +213,42 @@ autoplot(fc_f, hch.tsb_agg %>% ungroup() %>% filter(year(Date) >2012), level = N
 
 ```{r echo=FALSE}
 fc_f %>% 
+  filter(is_aggregated(region)) %>% filter(.model%in% c('min_trace_','ets_m')) %>% 
+  autoplot(hch.tsb_agg %>% filter(year(Date) >2011), level = NULL )
+
+```
+You can see below that minimum trace arima and ets reconcile has better forecast than other methodologies, especially in comparison with base ets or arima. 
+
+```{r echo=FALSE}
+fc_f %>% 
   filter(is_aggregated(region)) %>% 
-  autoplot(hch.tsb_agg %>% filter(year(Date) >2012), level = NULL )
+  autoplot(hch.tsb_agg %>% filter(year(Date) >2010), level = NULL )
+
+```
+We can reconfirm the above analysis by checking the rmse at the aggregated country-level. 
+
+```{r echo=FALSE}
+fc_all %>%
+  accuracy(
+    data = hch.tsb_agg,
+    measures = list(rmse = RMSE, mase = MASE, mape = MAPE)
+  ) %>%
+  filter(is_aggregated(region)) %>% 
+  #filter(.model == 'bottom_up') %>% 
+  arrange(rmse) %>% 
+  kable()
 
 ```
 
 ```{r echo=FALSE}
-fc_all %>% 
+fc_all %>%
+  accuracy(
+    data = hch.tsb_agg,
+    measures = list(rmse = RMSE, mase = MASE, mape = MAPE)
+  ) %>%
   filter(is_aggregated(region)) %>% 
-  autoplot(hch.tsb_agg %>% filter(year(Date) >2012), level = NULL )
+  #filter(.model == 'bottom_up') %>% 
+  arrange(rmse) %>% 
+  kable()
 
 ```
