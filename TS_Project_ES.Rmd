@@ -1,0 +1,119 @@
+---
+title: "ExponentialSmoothing"
+author: "Vidhath Raghavan"
+date: "2023-03-02"
+output: html_document
+---
+```{r}
+library(fpp)
+library(lubridate)
+library(dplyr)
+library(ggplot2)
+```
+
+```{r}
+df = read.csv('C:/Users/vidha/Time Series/hungary_chickenpox/hungary_chickenpox.csv')
+
+rs = data.frame(df[, -cbind(1)])
+df2 = data.frame(df[, 1])
+df2$Cases = rowSums(rs)
+colnames(df2)[1] = 'Date'
+```
+
+## Converting to Monthly
+(because ETS() cannot take in frequency > 24)
+```{r}
+df3 = df2
+df3$Date = as.Date(df3$Date, '%d/%m/%Y')
+df3 = data.frame(tapply(df3[[2]], format(df3[[1]], '%Y-%m'), sum))
+colnames(df3)[1] = 'MonthlyCases'
+```
+
+## Creating a Time Series + Train/Test Split
+```{r}
+ts = ts(df3$MonthlyCases, start = c(2005), frequency = 12)
+autoplot(ts)
+
+ts_train = window(ts, end = c(2012,12))
+ts_test = window(ts, start = c(2013))
+
+autoplot(ts_train)
+```
+
+## Exponential Smoothing
+```{r}
+ets = ets(ts_train)
+summary(ets)
+```
+
+## Plot Rolling Standard Deviation to prove multiplicative model for Error
+```{r}
+window_size <- 12
+ts_std <- ts %>% 
+  as.data.frame() %>% 
+  mutate(rolling_sd = zoo::rollapply(ts, window_size, sd, fill = NA, align = "right", na.rm = TRUE))
+
+ggplot(ts_std, aes(x = index(ts), y = rolling_sd)) + 
+  geom_line() +
+  labs(x = "Year", y = "Rolling Standard Deviation")
+```
+
+## Forecasting
+```{r}
+fcst = forecast(ets, h = 24)
+plot(fcst, xlab = 'Time', ylab = 'Chickenpox Cases in Hungary')
+lines(ts_test, col = 2)
+legend('top', legend = c('ETS Forecast', 'Actual'), col = c(4, 2), lty = 1)
+```
+
+## Error
+```{r}
+mae = mean(abs(fcst[['mean']] - ts_test))
+rmse = sqrt(mean((fcst[['mean']] - ts_test)^2))
+aicc = ets$aicc
+mae
+rmse
+aicc
+accuracy(fcst, ts_test)
+```
+
+## Forecasting till 2020
+```{r}
+ets2 = ets(ts)
+
+fcst2 = forecast(ets2, h = 60)
+plot(fcst2, xlab = 'Time', ylab = 'Chickenpox Cases in Hungary')
+```
+
+## ETS for only Budapest
+```{r}
+dfsb = data.frame(df[, c(1:2)])
+colnames(dfsb)[1] = 'Date'
+dfsub = dfsb
+dfsub$Date = as.Date(dfsub$Date, '%d/%m/%Y')
+dfsub = data.frame(tapply(dfsub[[2]], format(dfsub[[1]], '%Y-%m'), sum))
+colnames(dfsub)[1] = 'BudapestMonthlyCases'
+
+ts_sub = ts(dfsub$BudapestMonthlyCases, start = c(2005), frequency = 12)
+autoplot(ts_sub)
+
+ts_train2 = window(ts_sub, end = c(2012,12))
+ts_test2 = window(ts_sub, start = c(2013))
+
+autoplot(ts_train2)
+ets3 = ets(ts_train2)
+summary(ets3)
+
+fcst3 = forecast(ets3, h = 24)
+plot(fcst3, xlab = 'Time', ylab = 'Chickenpox Cases in Budapest')
+lines(ts_test2, col = 2)
+legend('top', legend = c('ETS Forecast', 'Actual'), col = c(4, 2), lty = 1)
+
+mae2 = mean(abs(fcst3[['mean']] - ts_test2))
+rmse2 = sqrt(mean((fcst3[['mean']] - ts_test2)^2))
+aicc2 = ets3$aicc
+mae2
+rmse2
+aicc2
+accuracy(fcst3, ts_test2)
+```
