@@ -45,6 +45,11 @@ autoplot(ts_train)
 ets = ets(ts_train)
 summary(ets)
 ```
+## Ljung - Box Test
+```{r}
+res = residuals(ets)
+Box.test(res, type = 'Ljung-Box')
+```
 
 ## Plot Rolling Standard Deviation to prove multiplicative model for Error
 ```{r}
